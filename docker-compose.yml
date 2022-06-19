@@ -1,0 +1,213 @@
+version: '3.7'
+services:
+  proxy:
+    image: 'bahmni/proxy:${PROXY_IMAGE_TAG:?}'
+    volumes:
+      #   - ${CERTIFICATE_PATH}:/etc/tls
+      - 'bahmni-patient-images:/home/bahmni/patient_images'
+      - 'bahmni-document-images:/home/bahmni/document_images'
+
+    ports:
+      - '80:80'
+      - '443:443'
+  bahmni-lab:
+    image: 'bahmni/bahmni-lab:${BAHMNI_LAB_IMAGE_TAG:?}'
+    ports:
+      - '8090:80'
+      - '8443:443'
+
+  openelis:
+    profiles: ['default', 'openelis']
+    image: 'bahmni/openelis:${OPENELIS_IMAGE_TAG:?[ERROR]}'
+    ports:
+      - '8052:8052'
+    #volumes:
+    #- "${BAHMNI_CONFIG_PATH}/openelis/:/etc/bahmni_config/openelis/"
+    environment:
+      OPENMRS_HOST: ${OPENMRS_HOST}
+      OPENMRS_PORT: ${OPENMRS_PORT:?}
+      OPENMRS_ATOMFEED_USER: ${OPENMRS_ATOMFEED_USER:?}
+      OPENMRS_ATOMFEED_PASSWORD: ${OPENMRS_ATOMFEED_PASSWORD:?}
+      OPENELIS_DB_SERVER: ${OPENELIS_DB_SERVER}
+    depends_on:
+      openelisdb:
+        condition: service_healthy
+
+  openelisdb:
+    profiles: ['default', 'openelis']
+    image: 'bahmni/openelis-db:${OPENELIS_DB_IMAGE_TAG:?[ERROR]}'
+    ports:
+      - '5432:5432'
+    volumes:
+      - '${OPENELIS_DB_DUMP_PATH}:/resources/db-dump'
+      - 'openelisdbdata:/var/lib/postgresql/data'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U postgres']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+
+  odoo:
+    profiles: ['default', 'odoo']
+    image: 'bahmni/odoo-10:${ODOO_IMAGE_TAG:?[ERROR]}'
+    ports:
+      - '8069:8069'
+    volumes:
+      - odooappdata:/var/lib/odoo
+      - ${EXTRA_ADDONS_PATH}:/mnt/extra-addons
+      # Uncomment the below volume only when you need to modify existing bahmni-addons. Also make sure to update the .env file variable with odoo-modules github repo cloned path.
+      # - ${BAHMNI_ODOO_MODULES_PATH}:/opt/bahmni-erp/bahmni-addons
+    depends_on:
+      odoodb:
+        condition: service_healthy
+    environment:
+      HOST: odoodb
+      USER: ${ODOO_DB_USER}
+      PASSWORD: ${ODOO_DB_PASSWORD}
+
+  odoodb:
+    profiles: ['default', 'odoo']
+    image: 'bahmni/odoo-10-db:${ODOO_DB_IMAGE_TAG:?[ERROR]}'
+    ports:
+      - '5431:5432'
+    volumes:
+      - '${ODOO_DB_DUMP_PATH}:/resources/db-dump'
+      - 'odoodbdata:/var/lib/postgresql/data'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U odoo']
+      interval: 10s
+      timeout: 5s
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${ODOO_DB_PASSWORD}
+      POSTGRES_USER: ${ODOO_DB_USER}
+
+  odoo-connect:
+    profiles: ['default', 'odoo']
+    image: 'bahmni/odoo-connect:${ODOO_CONNECT_IMAGE_TAG:?[ERROR]}'
+    environment:
+      ODOO_DB_SERVER: odoodb
+      ODOO_DB_USERNAME: ${ODOO_DB_USER:?}
+      ODOO_DB_PASSWORD: ${ODOO_DB_PASSWORD:?}
+      OPENMRS_HOST: ${OPENMRS_HOST:?}
+      OPENMRS_PORT: ${OPENMRS_PORT:?}
+      OPENMRS_ATOMFEED_USER: ${OPENMRS_ATOMFEED_USER:?}
+      OPENMRS_ATOMFEED_PASSWORD: ${OPENMRS_ATOMFEED_PASSWORD:?}
+      OPENELIS_HOST: ${OPENELIS_HOST:?}
+      OPENELIS_PORT: ${OPENELIS_PORT:?}
+      OPENELIS_ATOMFEED_USER: ${OPENELIS_ATOMFEED_USER:?}
+      OPENELIS_ATOMFEED_PASSWORD: ${OPENELIS_ATOMFEED_PASSWORD:?}
+      ODOO_HOST: ${ODOO_HOST:?}
+      ODOO_PORT: ${ODOO_PORT:?}
+      ODOO_ATOMFEED_USER: ${ODOO_ATOMFEED_USER:?}
+      ODOO_ATOMFEED_PASSWORD: ${ODOO_ATOMFEED_PASSWORD:?}
+    depends_on:
+      odoodb:
+        condition: service_healthy
+
+  openmrs:
+    profiles: ["default","openmrs","implementer-interface"]
+    image: bahmni/openmrs:${OPENMRS_IMAGE_TAG:?}
+    environment:
+      DB_DATABASE: ${OPENMRS_DB_NAME:?}
+      DB_HOST: ${OPENMRS_DB_HOST:?}
+      DB_USERNAME: ${OPENMRS_DB_USERNAME:?}
+      DB_PASSWORD: ${OPENMRS_DB_PASSWORD:?}
+      DB_CREATE_TABLES: ${OPENMRS_DB_CREATE_TABLES}
+      DB_AUTO_UPDATE: ${OPENMRS_DB_AUTO_UPDATE}
+      MODULE_WEB_ADMIN: ${OPENMRS_MODULE_WEB_ADMIN}
+      DEBUG: ${OPENMRS_DEBUG}
+      OPENELIS_HOST: ${OPENELIS_HOST:?}
+      OPENELIS_PORT: ${OPENELIS_PORT:?}
+      OPENELIS_ATOMFEED_USER: ${OPENELIS_ATOMFEED_USER:?}
+      OPENELIS_ATOMFEED_PASSWORD: ${OPENELIS_ATOMFEED_PASSWORD:?}
+    ports:
+      - '8080:8080'
+    volumes:
+      - 'openmrs-data:/usr/local/tomcat/.OpenMRS/modules'
+      #- "${BAHMNI_OPENMRS_MODULES_PATH:?}/:/usr/local/tomcat/.OpenMRS/modules/"
+      #- "${BAHMNI_CONFIG_PATH:?}/:/etc/bahmni_config/"
+      - 'bahmni-patient-images:/home/bahmni/patient_images'
+      - 'bahmni-document-images:/home/bahmni/document_images'
+    depends_on:
+      - openmrsdb
+
+  openmrsdb:
+    image: ${OPENMRS_DB_IMAGE_NAME:?}
+    restart: always
+    profiles: ["default","openmrs","implementer-interface"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?}
+      MYSQL_DATABASE: ${OPENMRS_DB_NAME:?}
+      MYSQL_USER: ${OPENMRS_DB_USERNAME:?}
+      MYSQL_PASSWORD: ${OPENMRS_DB_PASSWORD:?}
+    ports:
+      - '3306:3306'
+    volumes:
+      - 'openmrsdbdata:/var/lib/mysql'
+
+  bahmni-web:
+    image: bahmni/bahmni-web:${BAHMNI_WEB_IMAGE_TAG:?}
+    profiles: ['default', 'openmrs']
+    #volumes:
+    #- "${BAHMNI_APPS_PATH:?}/ui/app/:/usr/local/apache2/htdocs/bahmni"
+    #- "${BAHMNI_APPS_PATH:?}/ui/node_modules/@bower_components/:/usr/local/apache2/htdocs/bahmni/components"
+    #- "${BAHMNI_CONFIG_PATH:?}/:/usr/local/apache2/htdocs/bahmni_config/"
+
+
+  implementer-interface:
+    image: bahmni/implementer-interface:${IMPLEMENTER_INTERFACE_IMAGE_TAG:?}
+    profiles: ["default","implementer-interface"]
+    #volumes:
+    #  - "${IMPLEMENTER_INTERFACE_CODE_PATH:?}/dist:/usr/local/apache2/htdocs/implementer_interface"
+    depends_on:
+      - openmrs
+
+  reports:
+    image: bahmni/reports:${REPORTS_IMAGE_TAG:?}
+    profiles: ["default","reports"]
+    environment:
+      OPENMRS_DB_HOST: ${OPENMRS_DB_HOST:?}
+      OPENMRS_DB_NAME: ${OPENMRS_DB_NAME:?}
+      OPENMRS_DB_USERNAME: ${OPENMRS_DB_USERNAME:?}
+      OPENMRS_DB_PASSWORD: ${OPENMRS_DB_PASSWORD:?}
+      OPENMRS_HOST: ${OPENMRS_HOST:?}
+      OPENMRS_PORT: ${OPENMRS_PORT:?}
+      OPENELIS_DB_SERVER: ${OPENELIS_DB_SERVER}
+      REPORTS_DB_SERVER: reportsdb
+      REPORTS_DB_NAME: ${REPORTS_DB_NAME:?}
+      REPORTS_DB_USERNAME: ${REPORTS_DB_USERNAME:?}
+      REPORTS_DB_PASSWORD: ${REPORTS_DB_PASSWORD:?}
+      ODOO_DB_SERVER: odoodb
+      ODOO_DB_USERNAME: ${ODOO_DB_USER:?}
+      ODOO_DB_PASSWORD: ${ODOO_DB_PASSWORD:?}
+      #volumes:
+      #- "${BAHMNI_CONFIG_PATH:?}/openmrs/apps/reports/:/etc/bahmni_config/reports/"
+    depends_on:
+      - reportsdb
+      - openmrsdb
+      - bahmni-web
+
+  reportsdb:
+    platform: linux/amd64
+    image: mysql:5.6
+    profiles: ["default","reports"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?}
+      MYSQL_DATABASE: ${REPORTS_DB_NAME:?}
+      MYSQL_USER: ${REPORTS_DB_USERNAME:?}
+      MYSQL_PASSWORD: ${REPORTS_DB_PASSWORD:?}
+
+
+volumes:
+  openelisdbdata:
+  odoodbdata:
+  odooappdata:
+  openmrs-data:
+  openmrsdbdata:
+  bahmni-patient-images:
+  bahmni-document-images:
